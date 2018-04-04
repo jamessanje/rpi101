@@ -1,0 +1,135 @@
+#include <stdlib.h>
+#include <DHT.h>
+#define SensorPin A0          //pH meter Analog output to Arduino Analog Input 0
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+#define DHTPIN 7 
+#define DHTTYPE DHT11 
+DHT dht(DHTPIN, DHTTYPE);
+
+#define ONE_WIRE_BUS 2
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+
+unsigned long int avgValue;  //Store the average value of the sensor feedback
+float b;
+int buf[10],temp;
+
+
+int pumpRelay = 13, pumpOn = 0;
+int peltierRelay = 12, peltierOn = 0;
+int phUpRelay = 11, phUpOn = 0;
+int phDownRelay = 10, phDownOn = 0;
+int peltierRelay2 = 9, peltier2On = 0;
+int solutionRelay = 8, solutionOn = 0;
+
+void setup()
+{
+  pinMode(peltierRelay,OUTPUT);  
+  pinMode(phUpRelay,OUTPUT);
+  pinMode(phDownRelay, OUTPUT);
+  pinMode(pumpRelay, OUTPUT);
+  pinMode(peltierRelay2, OUTPUT);
+  pinMode(solutionRelay, OUTPUT);
+  
+  digitalWrite(peltierRelay, LOW);
+  digitalWrite(peltierRelay2, LOW);
+  digitalWrite(phUpRelay, LOW);
+  digitalWrite(phDownRelay, LOW);
+  digitalWrite(pumpRelay, LOW);
+  digitalWrite(solutionRelay, LOW);
+  
+  Serial.begin(9600);  
+  dht.begin(); 
+}
+void loop()
+{
+  for(int i=0;i<10;i++)       //Get 10 sample value from the sensor for smooth the value
+  { 
+    buf[i]=analogRead(SensorPin);
+    delay(10);
+  }
+  for(int i=0;i<9;i++)        //sort the analog from small to large
+  {
+    for(int j=i+1;j<10;j++)
+    {
+      if(buf[i]>buf[j])
+      {
+        temp=buf[i];
+        buf[i]=buf[j];
+        buf[j]=temp;
+      }
+    }
+  }
+  avgValue=0;
+  for(int i=2;i<8;i++)                      //take the average value of 6 center sample
+    avgValue+=buf[i];
+  float phValue=(float)avgValue*5.0/1024/6; //convert the analog into millivolt
+  phValue=3.5*phValue;                      //convert the millivolt into pH value
+  
+  sensors.requestTemperatures();
+
+  float humidityDHT = dht.readHumidity();
+  float tempDHT = dht.readTemperature();
+  //Compute heat index in Celsius (isFahrenheit = false)
+  float heatIndex = dht.computeHeatIndex(tempDHT,humidityDHT,false);
+  
+ 
+  //throw values to python
+  Serial.print(sensors.getTempCByIndex(0));
+  Serial.print(" ");  
+  Serial.print(phValue,2);
+  Serial.print(" ");
+  Serial.print(humidityDHT);
+  Serial.print(" ");
+  Serial.print(heatIndex);
+  Serial.print(" ");
+  Serial.println(tempDHT);
+  
+  if (Serial.available()) {
+        char serialListener = Serial.read();
+        if (serialListener == 'A') {
+            digitalWrite(peltierRelay, LOW);
+            
+        }
+        if (serialListener == 'B') {
+            digitalWrite(peltierRelay, HIGH);
+            digitalWrite(peltierRelay2, HIGH);
+        }
+        
+        if (serialListener == 'C') {
+            
+            digitalWrite(phDownRelay, LOW);
+            digitalWrite(phUpRelay, HIGH);
+            delay(5000);
+            digitalWrite(phUpRelay, LOW);
+            
+        }
+        
+        if (serialListener == 'D') {
+          
+            digitalWrite(phUpRelay, LOW);
+            digitalWrite(phDownRelay, HIGH);
+            delay(5000);
+            digitalWrite(phDownRelay, LOW);
+            
+        }
+        if (serialListener == 'E') {
+            digitalWrite(pumpRelay, HIGH);
+        }
+
+        if (serialListener == 'F') {
+            digitalWrite(pumpRelay, LOW);
+        }
+
+        if (serialListener == 'G') {
+            digitalWrite(solutionRelay, HIGH);
+        }
+
+        if (serialListener == 'H') {
+            digitalWrite(solutionRelay, LOW);
+        }
+  }
+  delay(1000);
+}

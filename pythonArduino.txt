@@ -1,0 +1,191 @@
+import datetime
+import pyrebase
+import statistics
+import serial 
+import time
+
+print(__name__)
+arduino = serial.Serial('COM10', 9600, timeout=.1)
+
+config = {
+    "apiKey" : "AIzaSyCfOVS4fKzugZEv2o26Ir8rjkH2XwayfJo",
+    "authDomain" : "hvccare-5b4bc.firebaseapp.com",
+    "databaseURL" : "https://hvccare-5b4bc.firebaseio.com",
+    "projectId" : "hvccare-5b4bc",
+    "storageBucket": "hvccare-5b4bc.appspot.com",
+    "messagingSenderId": "706149028538"
+}
+
+firebase = pyrebase.initialize_app(config)
+
+db = firebase.database()
+
+crops_temp = []
+crops_phlevel = []
+crops_hum = []
+
+crops_high_temp = []
+crops_high_phlevel = []
+crops_high_hum = []
+
+crops_low_temp = []
+crops_low_phlevel = []
+crops_low_hum = []
+
+results = db.child("Crop_Data").child("Crop_Name").get()
+for result in results.each():
+    print(result.val())
+    results = db.child("Standard_Parameters").child(result.val()).get()
+    for value in results.each():
+        if value.key() == "Average_Temp_C":
+            temperature = value.val()
+            crops_temp.append(temperature)
+        if value.key() == "Average_PHLevel":
+            phlevel = value.val()
+            crops_phlevel.append(phlevel)
+        if value.key() == "Average_Humidity":
+            hum = value.val()
+            crops_hum.append(hum)
+        if value.key() == "Highest_Opt_Temp_C":
+            temperature = value.val()
+            crops_high_temp.append(temperature)
+        if value.key() == "Highest_Opt_PHLevel":
+            phlevel = value.val()
+            crops_high_phlevel.append(phlevel)
+        if value.key() == "Highest_Opt_Humidity":
+            hum = value.val()
+            crops_high_hum.append(hum)
+        if value.key() == "Lowest_Opt_Temp_C":
+            temperature = value.val()
+            crops_low_temp.append(temperature)
+        if value.key() == "Lowest_Opt_PHLevel":
+            phlevel = value.val()
+            crops_low_phlevel.append(phlevel)
+        if value.key() == "Lowest_Opt_Humidity":
+            hum = value.val()
+            crops_low_hum.append(hum)
+            
+
+print(max(crops_high_phlevel))
+#print(crops_phlevel)
+
+#print(statistics.median(map(float,crops_temp)))
+#print(statistics.median(map(float,crops_phlevel)))
+
+median_temp = statistics.median(map(float,crops_temp))
+median_phlevel = statistics.median(map(float,crops_phlevel))
+median_hum = statistics.median(map(float,crops_hum))
+
+db.child("Sensor_Data").update({"Optimal_PhLevel": str(median_phlevel) })
+db.child("Sensor_Data").update({"Optimal_Temperature": str(median_temp) })
+db.child("Sensor_Data").update({"Optimal_Humidity": str(median_hum) })
+
+db.child("Sensor_Data").update({"Optimal_Temperature_Highest": max(crops_high_temp)})
+db.child("Sensor_Data").update({"Optimal_PhLevel_Highest": max(crops_high_phlevel)})
+db.child("Sensor_Data").update({"Optimal_Humidity_Highest": max(crops_high_hum)})
+
+db.child("Sensor_Data").update({"Optimal_Temperature_Lowest": min(crops_low_temp)})
+db.child("Sensor_Data").update({"Optimal_PhLevel_Lowest": min(crops_low_phlevel)})
+db.child("Sensor_Data").update({"Optimal_Humidity_Lowest": min(crops_low_hum)})
+
+tempSensor = 0.0
+phSensor = 0.0
+humiditySensor = 0.0
+
+every = 0
+reference = datetime.datetime.today()
+
+def set_database():
+    now = datetime.datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+    year_now = datetime.datetime.today().strftime("%Y")
+    month_now = datetime.datetime.today().strftime("%m")
+    day_now = datetime.datetime.today().strftime("%d")
+    date_now = datetime.datetime.today().strftime("%Y-%m-%d")    
+    date_name = datetime.datetime.today().strftime("%B %d, %Y")
+    time_now = datetime.datetime.today().strftime("%H:%M:%S")
+
+    result = db.child("Realtime_Data").child(year_now).child(month_now).child(day_now).child(date_now).child(now).set({'Date':now,'Time':time_now,'Date_Complete':date_name,'Measured_Temp_C':tempSensor,'Measured_Humidity':humiditySensor,'Measured_PHLevel': phSensor})
+    print(result)
+
+actuators_value = []
+
+while True:
+    try:
+        data = arduino.readline().decode().strip()
+        
+        splitData = data.split()
+        print(splitData)
+        
+        firebase = pyrebase.initialize_app(config)
+
+        db = firebase.database()
+        
+
+        if splitData:
+            tempSensor = float(splitData[0])
+            phSensor = float(splitData[1])
+            humiditySensor = float(splitData[2])
+            
+
+        
+
+        if reference <= (datetime.datetime.now() - datetime.timedelta(minutes = 30)):
+            set_database()
+            reference = datetime.datetime.today()
+        
+            
+        db.child("Sensor_Data").update({"Measured_PhLevel": str(phSensor) })
+        db.child("Sensor_Data").update({"Measured_Temperature": str(tempSensor) })
+        db.child("Sensor_Data").update({"Measured_Humidity": str(humiditySensor) })
+        
+        actuators = db.child("Actuator_Status").child("Monitor").get()
+        for act in actuators.each():
+            if act.key() == "Waterpump_Status":
+                actuators_value.append(act.val())
+            if act.key() == "Solution_Status":
+                actuators_value.append(act.val())
+            
+
+        print(actuators_value)
+            
+        #print(median_temp-0.5)
+        if  (tempSensor <= (median_temp-0.5)):
+            print("#TurnOff Peltier")
+            
+            arduino.write('A'.encode())
+        if tempSensor >= (median_temp+1):
+            print("#TurnOn Peltier")
+            
+            arduino.write('B'.encode())
+        if phSensor <= (median_phlevel-0.5):
+            print("#PhUp TurnedOn")
+            
+            arduino.write('C'.encode())
+        if phSensor >= (median_phlevel+0.5):
+            print("#PhDown TurnedOn")
+
+            arduino.write('D'.encode())
+        if actuators_value[0] == "true":
+            print("#TurnOn Pump")
+             
+            arduino.write('E'.encode())
+        if actuators_value[0] == "false":
+            print("#TurnOff Pump")
+             
+            arduino.write('F'.encode())
+        
+        if actuators_value[1] == "true":
+            print("#TurnOn Solution")
+            arduino.write('G'.encode())
+        
+        if actuators_value[1] == "false":
+            print("#TurnOff Solution")
+            arduino.write('H'.encode())
+        
+        
+        
+        actuators_value.clear()
+        
+    except BaseException as error:
+        print('An exception occurred: {}'.format(error))        
+
